@@ -5,6 +5,7 @@ import numpy as np
 import pandas as pd
 import psutil
 import torch
+import torch.nn as nn
 import torchvision.transforms as transforms
 from sklearn.metrics import (accuracy_score, confusion_matrix, f1_score,
                              precision_score, recall_score, roc_auc_score)
@@ -21,24 +22,42 @@ from dataset import ImageNetValidation
 board_name = Board.RASPBERRY_PI_4
 
 model_name = 'inception_v3'
-model = models.inception_v3(weights=Inception_V3_Weights.IMAGENET1K_V1)
+model_weights = '/Users/parth/.data/models/inceptionV3_cifar10_last_layer.ckpt'
+model = models.inception_v3()
 
-dataset_name = 'imagenet_validation'
-num_samples = 1000
+dataset_name = 'cifar10'
 
-TORCH_HOME = os.path.expanduser("~/shared")
+TORCH_HOME = os.path.expanduser("~/mnt/shared")
 read_cpu_temp = check_RPI_CPU_temp
 
 # ------------------------------------------------
 
+# ------------------------------------------------
+# --------- Edit Last Layer of models ------------
+# ------------------------------------------------
+#For vgg16, alexnet
+# num_ftrs = model.classifier[-1].in_features
+# model.classifier[-1] = nn.Linear(num_ftrs, 10)
 
+# For DenseNet
+# num_ftrs = model.classifier.in_features
+# model.classifier = nn.Linear(num_ftrs, 10)
 
+# For ResNet, Inception, GoogleNet, ResNext
+num_ftrs = model.fc.in_features
+model.fc = nn.Linear(num_ftrs, 10)
+
+# For squeezenet1_1
+# num_ftrs = model.classifier[1].in_channels
+# model.classifier[1] = nn.Conv2d(num_ftrs, 10, kernel_size=(1, 1), stride=(1, 1))
+# model.num_classes = 10
+# ------------------------------------------------
 
 os.environ['TORCH_HOME'] = TORCH_HOME
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-
 # Load model
+model.load_state_dict(torch.load(model_weights, map_location=device))
 model.eval()
 model.to(device)
 
@@ -47,21 +66,12 @@ model.to(device)
 # --------- CHange this if dataset is not image net ------------
 # --------------------------------------------------------------
 transform = transforms.Compose([
-    transforms.Resize(256),
-    transforms.CenterCrop(224),
+    transforms.Resize(299),
     transforms.ToTensor(),
-    transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
+    transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))
 ])
 
-
-data_dir = os.path.join(TORCH_HOME, 'ILSVRC2012_img_val')
-ground_truth_file = os.path.join(TORCH_HOME, 'ILSVRC2012_validation_ground_truth.txt')
-dataset = ImageNetValidation(
-    data_dir,
-    ground_truth_file,
-    transform=transform,
-    num_samples=num_samples
-)
+dataset = datasets.CIFAR10(root=TORCH_HOME, transform=transform, download=True)
 # --------------------------------------------------------------
 
 data_loader = DataLoader(dataset, batch_size=32, shuffle=False)
@@ -69,6 +79,7 @@ data_loader = DataLoader(dataset, batch_size=32, shuffle=False)
 # Performance metrics storage
 metrics = []
 all_preds = []  # To store all predictions
+total_coorect = 0
 all_labels = []  # To store all labels
 
 # Run inference
@@ -87,6 +98,9 @@ with torch.no_grad():
         _, preds = torch.max(outputs.data, 1)
 
         # Store predictions and labels
+        correct = (preds == labels).sum().item()
+        print("Accuracy: ", correct / len(labels) * 100)
+        total_coorect += correct
         all_preds.append(preds.cpu().numpy())  # Append predictions for this batch
         all_labels.append(labels.cpu().numpy())  # Append labels for this batch
 
